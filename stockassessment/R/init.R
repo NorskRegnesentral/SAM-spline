@@ -159,6 +159,32 @@ defpar <- function(dat,conf,spinoutyear=10){
   ## ret$logScaleFlim <- 0
   ## ret$logScaleFmsyRange <- matrix(0,2,0)
   ret$splinePenalty <- 0
+
+  if (conf$useLogFparSpline) {
+    ret$logFparSplinePar = rep(-5, ncol(conf$logFparSplineX))
+    ret$logFpar = numeric(0)
+    if (conf$useLogFparSplinePenalty) {
+      ret$logFparSplinePenalty = rep(0, length(conf$logFparSplineS))
+    } else {
+      ret$logFparSplinePenalty = numeric(0)
+    }
+  } else {
+    ret$logFparSplinePar = numeric(0)
+    ret$logFparSplinePenalty = numeric(0)
+  }
+
+  if (conf$useVarObsSpline) {
+    ret$varObsSplinePar = rep(-.35, ncol(conf$varObsSplineX))
+    ret$logSdLogObs = numeric(0)
+    if (conf$useVarObsSplinePenalty) {
+      ret$varObsSplinePenalty = rep(0, length(conf$varObsSplineS))
+    } else {
+      ret$varObsSplinePenalty = numeric(0)
+    }
+  } else {
+    ret$varObsSplinePar = numeric(0)
+    ret$varObsSplinePenalty = numeric(0)
+  }
   
   ## Latent variables
   ret$logF=matrix(0, nrow=max(conf$keyLogFsta)+1,ncol=dat$noYears)

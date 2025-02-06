@@ -139,6 +139,33 @@ Type objective_function<Type>::operator() ()
   DATA_IVECTOR(logNMeanAssumption); confset.logNMeanAssumption=logNMeanAssumption;
   DATA_INTEGER(initState); confset.initState = initState;
 
+  /*
+    If useLogFparSpline/useVarObsSpline is different from 0, then logFpar/logSdLogObs will be modelled as
+    X * beta, instead of being modelled using the keyLogFpar/keyVarObs matrix.
+    Here, X is a fixed matrix, given as input to the model (logFparSplineX/varObsSplineX), and beta is a vector
+    of parameters (logFparSplinePar/varObsSplinePar).
+
+    If useLogFparSplinePenalty/useVarObsSplinePenalty is different from 0, then a penalty is added to the log likelihood
+    in order to shrink the beta parameters. The penalty has the form
+    Sum_i lambda_i beta^T S_i beta, where lambda_i is a penalty parameter to be
+    estimated (logFparSplinePenalty/varObsSplinePenalty), and S_i is a fixed matrix, given as input to
+    the model. The list of penalty matrices S_1, ..., S_n is given by the DATA_STRUCT
+    logFparSplineS/varObsSplineS. The ranks of the penalty matrices are given by the vector
+    logFparSplineSrank/varObsSplineSrank
+  */
+  DATA_INTEGER(useLogFparSpline);
+  DATA_MATRIX(logFparSplineX);
+  DATA_INTEGER(useLogFparSplinePenalty);
+  DATA_STRUCT(logFparSplineS, listSparseMatrixFromR);
+  DATA_VECTOR(logFparSplineSrank);
+  DATA_INTEGER(useVarObsSpline);
+  DATA_MATRIX(varObsSplineX);
+  DATA_INTEGER(useVarObsSplinePenalty);
+  DATA_STRUCT(varObsSplineS, listSparseMatrixFromR);
+  DATA_VECTOR(varObsSplineSrank);
+  DATA_SCALAR(splinePenaltyMax);
+  DATA_SCALAR(splinePenaltySpeed);
+
   DATA_INTEGER(reportingLevel);
 
   paraSet<Type> paraset;
@@ -202,6 +229,13 @@ Type objective_function<Type>::operator() ()
   // PARAMETER_MATRIX(logScaleFmsyRange); paraset.logScaleFmsyRange = logScaleFmsyRange;
 
   PARAMETER(splinePenalty); paraset.splinePenalty = splinePenalty;
+
+  // Parameters for the parametric functions for logFpar and varObs,
+  // together with their potential penalty parameters
+  PARAMETER_VECTOR(logFparSplinePar);
+  PARAMETER_VECTOR(logFparSplinePenalty);
+  PARAMETER_VECTOR(varObsSplinePar);
+  PARAMETER_VECTOR(varObsSplinePenalty);
   
   PARAMETER_ARRAY(logF); 
   PARAMETER_ARRAY(logN);
@@ -224,15 +258,52 @@ Type objective_function<Type>::operator() ()
     }    
   }
 
-  
-  
+  Type ans=0.0; //negative log-likelihood
 
+  Type penalty=0.0;
+
+  if (useLogFparSpline) {
+    // Compute the spline function for logFpar, and update the value inside paraset
+    paraset.logFpar = logFparSplineX * logFparSplinePar;
+    if (useLogFparSplinePenalty) {
+      for (int i = 0; i < logFparSplinePenalty.size(); ++i) {
+	// Compute the penalty terms for the logFpar parameters.
+	// The small extra term added to the quadform is added to ensure
+	// numerical stability for when the penalty parameter grows very large
+	penalty -= Type(0.5) * logFparSplineSrank(i) * logFparSplinePenalty(i)
+	  - Type(0.5) * exp(logFparSplinePenalty(i)) * (density::GMRF(logFparSplineS(i)).Quadform(logFparSplinePar) + 0.0000001);
+	// Ensure that the penalty parameter does not grow too large by adding a prior to it
+	// that penalises too large penalty parameter values
+	penalty += log(1 + exp(splinePenaltySpeed * (splinePenaltyMax - logFparSplinePenalty(i)))) - splinePenaltySpeed * (splinePenaltyMax - logFparSplinePenalty(i));
+      }
+    }
+  }
+  ADREPORT_F(paraset.logFpar, this);
+
+  if (useVarObsSpline) {
+    // Compute the spline function for logSdLogObs, and update the value inside paraset
+    paraset.logSdLogObs = varObsSplineX * varObsSplinePar;
+    if (useVarObsSplinePenalty) {
+      for (int i = 0; i < varObsSplinePenalty.size(); ++i) {
+	// Compute the penalty terms for the logSdLogObs parameters.
+	// The small extra term added to the quadform is added to ensure
+	// numerical stability for when the penalty parameter grows very large
+	penalty -= Type(0.5) * varObsSplineSrank(i) * varObsSplinePenalty(i)
+	  - Type(0.5) * exp(varObsSplinePenalty(i)) * (density::GMRF(varObsSplineS(i)).Quadform(varObsSplinePar) + 0.0000001);
+	// // Ensure that the penalty parameter does not grow too large by adding a prior to it
+	// // that penalises too large penalty parameter values
+	penalty += log(1 + exp(splinePenaltySpeed * (splinePenaltyMax - varObsSplinePenalty(i)))) - splinePenaltySpeed * (splinePenaltyMax - varObsSplinePenalty(i));
+      }
+    }
+  }
+  ADREPORT_F(paraset.logSdLogObs, this);
+
+  ADREPORT_F(penalty, this);
+  ans += penalty;
 
   Recruitment<Type> recruit = makeRecruitmentFunction(confset, paraset);
 
   prepareForForecast(forecast, dataset, confset, paraset, logF, logN, recruit);
-
-  Type ans=0.0; //negative log-likelihood
 
   if(CppAD::Variable(keep.sum())){ // add wide prior for first state, but _only_ when computing ooa residuals
     Type huge = 10.0;

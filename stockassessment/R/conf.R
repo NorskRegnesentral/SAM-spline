@@ -151,6 +151,23 @@ defcon<-function(dat, level=1){
     ret$keyXtraSd<-matrix(NA_integer_, nrow=0, ncol=4)
     ret$logNMeanAssumption <- c(0,0)
     ret$initState <- 0
+
+    # Added variables used for the spline modelling
+    ret$useLogFparSpline = 0
+    ret$useVarObsSpline = 0
+    ret$useLogFparSplinePenalty = 0
+    ret$useVarObsSplinePenalty = 0
+    ret$logFparSplineX = matrix(NA_real_, 0, 0)
+    ret$logFparSplineS = list(as(matrix(NA_real_, 0, 0), "TsparseMatrix"))
+    ret$logFparSplineSrank = numeric(0)
+    ret$varObsSplineX = matrix(NA_real_, 0, 0)
+    ret$varObsSplineS = list(as(matrix(NA_real_, 0, 0), "TsparseMatrix"))
+    ret$varObsSplineSrank = numeric(0)
+    ret$splinePenaltyMax = 10000
+    ret$splinePenaltySpeed = 100
+    ret$latentLogFparSpline = 0
+    ret$latentVarObsSpline = 0
+
     return(ret) 
 }
 
@@ -161,6 +178,9 @@ defcon<-function(dat, level=1){
 ##' @details function useful for saving a model configuration. A saved configuration can be read back in via the loadConf function 
 ##' @export
 saveConf <- function(x, file="", overwrite=FALSE){
+    op <- options(max.print = 1e6)
+    options(width = 1e4)
+    on.exit(options(op))
     writeConf <- function(x,...) UseMethod("writeConf")
 
     writeConf.default <- function(x,...){
@@ -183,9 +203,27 @@ saveConf <- function(x, file="", overwrite=FALSE){
         }
     }
 
+    writeConf.dsTMatrix <- function(x, ...) {
+      i_vals = attr(x, "i")
+      j_vals = attr(x, "j")
+      x_vals = attr(x, "x")
+      cat(paste0("DIM: ", dim(x)[1], ",", dim(x)[2], "\n"), ...)
+      for (i in seq_along(i_vals)) {
+        cat(paste(i_vals[i], j_vals[i], x_vals[i], sep = ","), "\n", ...)
+      }
+    }
+
     writeConf.factor <- function(x,...){
         cat(" | Possible values are:", paste0('\"',levels(x),'\"'), ...)
         cat("\n", paste0('\"',x,'\"'),"\n", ...)
+    }
+
+    writeConf.list <- function(x, ...) {
+      cat("LIST:\n", ...)
+      for (i in seq_along(x)) {
+        cat(paste0(i, ")\n"), ...)
+        writeConf(x[[i]], ...)
+      }
     }
     
     if(file.exists(file) & !overwrite){
@@ -240,6 +278,20 @@ saveConf <- function(x, file="", overwrite=FALSE){
         txt$keyMortalityObsVar <- "Coupling of natural mortality observation variance parameters (not used if mortalityModel==0)"
         txt$keyXtraSd<-"An integer matrix with 4 columns (fleet year age coupling), which allows additional uncertainty to be estimated for the specified observations"
         txt$logNMeanCorrection <- "Flags indicating what the population model should correspond to. 0: Median, 1: Mean, 2: Mode. Two values are are given to differentiate recruitment and other ages."
+        txt$useLogFparSpline = "A boolean variable, describing if we should model logFpar with a spline or not\n"
+        txt$useVarObsSpline = "A boolean variable, describing if we should model logSdLogObs with a spline or not\n"
+        txt$uselogFparSplinePenalty = "A boolean variable, describing if we should add a penalty parameter to the logFpar spline or not\n"
+        txt$useVarObsSplinePenalty = "A boolean variable, describing if we should add a penalty parameter to the logSdLogObs spline or not\n"
+        txt$logFparSplineX = "The X matrix used for modelling logFpar with a spline function\n"
+        txt$varObsSplineX = "The X matrix used for modelling logSdLogObs with a spline function\n"
+        txt$logFparSplineS = "A list of different sparse S matrices, used for penalising the logFpar spline\n"
+        txt$varObsSplineS = "A list of different sparse S matrices, used for penalising the logSdLogObs spline\n"
+        txt$logFparSplineSrank = "A vector, containing the ranks of all the S matrices for the logFpar spline\n"
+        txt$varObsSplineSrank = "A vector, containing the ranks of all the S matrices for the logSdLogObs spline\n"
+        txt$splinePenaltyMax = "The cutoff value where the prior density of the log penalty parameter should be equal to 0.5\n"
+        txt$splinePenaltySpeed = "The value that describes how quickly the log penalty prior should decrease towards zero as we reach the splinePenaltyMax value\n"
+        txt$latentLogFparSpline = "A boolean variable, describing if the spline parameters for logFpar should be considered as latent random values that should be integrated out with the Laplace approximation\n"
+        txt$latentVarObsSpline = "A boolean variable, describing if the spline parameters for logSdLogObs should be considered as latent random values that should be integrated out with the Laplace approximation\n"
         nam<-names(x)
         dummy<-lapply(1:length(nam), function(i){
             cat('\n$', file=file, append=TRUE)
@@ -273,31 +325,84 @@ loadConf <- function(dat, file, patch=TRUE){
         }
         ret
     }
-    readConf <- function(x) UseMethod("readConf")
+    readConf <- function(x, lines = NULL) UseMethod("readConf")
 
-    readConf.default <- function(x){
+    readConf.default <- function(x, lines = NULL){
         stop("Unimplemented class in readConf")
     }
-    readConf.numeric <- function(x){
-        nam <- attr(x,"nam")
-        scan(textConnection(lin[getIdx(nam)]), quiet=TRUE)
+    readConf.numeric <- function(x, lines = NULL){
+        if (is.null(lines)) {
+          nam <- attr(x,"nam")
+          lines <- lin[getIdx(nam)]
+        }
+        scan(textConnection(lines), quiet=TRUE)
     }
-    readConf.integer <- function(x){
-        nam <- attr(x,"nam")
-        scan(textConnection(lin[getIdx(nam)]), quiet=TRUE)
+    readConf.integer <- function(x, lines = NULL){
+        if (is.null(lines)) {
+          nam <- attr(x,"nam")
+          lines <- lin[getIdx(nam)]
+        }
+        scan(textConnection(lines), quiet=TRUE)
     }
-    readConf.matrix <- function(x){
-        nam <- attr(x,"nam")
-        x <- try(read.table(text=lin[getIdx(nam)], header=FALSE), silent = TRUE)
+    readConf.matrix <- function(x, lines = NULL){
+        if (is.null(lines)) {
+          nam <- attr(x,"nam")
+          lines <- lin[getIdx(nam)]
+        }
+        x <- try(read.table(text=lines, header=FALSE), silent = TRUE)
         if(inherits(x, "try-error")){
             return(matrix(NA_real_, nrow=0, ncol=0))
         }else{
             return(as.matrix(x))
         }
     }
-    readConf.factor <- function(x){
+    readConf.dsTMatrix <- function(x, lines = NULL) {
+      if (is.null(lines)) {
         nam <- attr(x,"nam")
-        factor(scan(textConnection(lin[getIdx(nam)]), what="character", quiet="TRUE"), levels=levels(x))
+        lines <- lin[getIdx(nam)]
+      }
+      dim = as.integer(strsplit(sub("^DIM: (\\d+,\\d+)", "\\1", lines[1]), ",")[[1]])
+      lines = lines[-1]
+      line_splits = strsplit(lines, ",")
+      i_vals = as.integer(sapply(line_splits, `[[`, 1))
+      j_vals = as.integer(sapply(line_splits, `[[`, 2))
+      x_vals = as.numeric(sapply(line_splits, `[[`, 3))
+      out = Matrix::sparseMatrix(
+        i = i_vals,
+        j = j_vals,
+        x = x_vals,
+        symmetric = TRUE,
+        index1 = FALSE
+      )
+      out = as(out, "TsparseMatrix")
+      return(out)
+    }
+    readConf.list <- function(x, lines = NULL) {
+        if (is.null(lines)) {
+          nam <- attr(x,"nam")
+          lines <- lin[getIdx(nam)]
+        }
+        is_list = (lines[1] == "LIST:")
+        lines = lines[-1]
+        starting_line_indices = grep("^\\d+)$", lines)
+        correct_length = (length(x) == length(starting_line_indices))
+        split_indices = c(starting_line_indices, length(lines))
+        if (!is_list || !correct_length) {
+          return(list())
+        }
+        out = list()
+        for (i in seq_along(x)) {
+          indx = (split_indices[i] + 1):(split_indices[i + 1] - 1)
+          out[[i]] = readConf(x[[i]], lines[indx])
+        }
+        return(out)
+    }
+    readConf.factor <- function(x, lines = NULL){
+        if (is.null(lines)) {
+          nam <- attr(x,"nam")
+          lines <- lin[getIdx(nam)]
+        }
+        factor(scan(textConnection(lines), what="character", quiet="TRUE"), levels=levels(x))
     }
     isOK <- sapply(names(dconf), function(n)length(grep(paste0("^\\$",n, "( |$)"),lin))==1)
     if(!all(isOK) & !patch)stop("The configuration file is not compatible with model version. Consider running with patch=TRUE")

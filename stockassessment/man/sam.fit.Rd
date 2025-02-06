@@ -18,6 +18,7 @@ sam.fit(
   rel.tol = 1e-10,
   penalizeSpline = FALSE,
   fullDerived = FALSE,
+  trace = 1,
   ...
 )
 }
@@ -47,6 +48,8 @@ sam.fit(
 \item{penalizeSpline}{Add penalization to spline recruitment?}
 
 \item{fullDerived}{Report all derived values?}
+
+\item{trace}{Trace input to nlminb optimisation}
 
 \item{...}{extra arguments to MakeADFun}
 }

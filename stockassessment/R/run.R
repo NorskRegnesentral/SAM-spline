@@ -12,6 +12,7 @@
 ##' @param rel.tol option passed to stats:::nlminb sets the convergence criteria
 ##' @param penalizeSpline Add penalization to spline recruitment?
 ##' @param fullDerived Report all derived values?
+##' @param trace Trace input to nlminb optimisation
 ##' @param ... extra arguments to MakeADFun
 ##' @return an object of class \code{sam}
 ##' @details The model configuration object \code{conf} is a list of different objects defining different parts of the model. The different elements of the list are: 
@@ -51,7 +52,7 @@
 ##' fit <- sam.fit(nscodData, nscodConf, nscodParameters, silent = TRUE)
 ##' @references
 ##' Albertsen, C. M. and Trijoulet, V. (2020) Model-based estimates of reference points in an age-based state-space stock assessment model. Fisheries Research, 230, 105618. \doi{10.1016/j.fishres.2020.105618}
-sam.fit <- function(data, conf, parameters, newtonsteps=3, rm.unidentified=FALSE, run=TRUE, lower=getLowerBounds(parameters, conf), upper=getUpperBounds(parameters, conf), sim.condRE=TRUE, ignore.parm.uncertainty = FALSE, rel.tol=1e-10, penalizeSpline = FALSE, fullDerived = FALSE, ...){
+sam.fit <- function(data, conf, parameters, newtonsteps=3, rm.unidentified=FALSE, run=TRUE, lower=getLowerBounds(parameters, conf), upper=getUpperBounds(parameters, conf), sim.condRE=TRUE, ignore.parm.uncertainty = FALSE, rel.tol=1e-10, penalizeSpline = FALSE, fullDerived = FALSE, trace = 1, ...){
     if(length(conf$maxAgePlusGroup)==1){
         tmp <- conf$maxAgePlusGroup    
         conf$maxAgePlusGroup <- defcon(data)$maxAgePlusGroup
@@ -79,6 +80,9 @@ sam.fit <- function(data, conf, parameters, newtonsteps=3, rm.unidentified=FALSE
     ran <- c("logN", "logF", "missing", "logSW", "logCW", "logitMO", "logNM", "logP")
     if(penalizeSpline)
         ran <- c(ran, "rec_pars")
+
+    if (!is.null(conf$useLogFparSpline) && conf$useLogFparSpline && conf$latentLogFparSpline) ran = c(ran, "logFparSplinePar")
+    if (!is.null(conf$useVarObsSpline) && conf$useVarObsSpline && conf$latentVarObsSpline) ran = c(ran, "varObsSplinePar")
     
     args <- c(list(data = tmball,
                    parameters = parameters,
@@ -151,7 +155,7 @@ sam.fit <- function(data, conf, parameters, newtonsteps=3, rm.unidentified=FALSE
   ##     opt <- nlminb(obj$par, obj$fn,obj$gr, obj$he, control=list(trace=1, eval.max=2000, iter.max=1000, rel.tol=rel.tol),lower=lower2,upper=upper2)
   ##     he <- obj$he
   ## }else{
-  opt <- nlminb(obj$par, obj$fn,obj$gr ,control=list(trace=1, eval.max=2000, iter.max=1000, rel.tol=rel.tol),lower=lower2,upper=upper2)
+  opt <- nlminb(obj$par, obj$fn,obj$gr ,control=list(trace=trace, eval.max=2000, iter.max=1000, rel.tol=rel.tol),lower=lower2,upper=upper2)
   
     he <- function(par){ optimHess(par, obj$fn, obj$gr) }
     ## }

@@ -41,6 +41,46 @@ SOURCE(
 SAM_SPECIALIZATION(struct listMatrixFromR<double>);
 SAM_SPECIALIZATION(struct listMatrixFromR<TMBad::ad_aug>);
 
+//This function returns a vector with sparse matrices based on a list of sparse matrices from R
+HEADER(
+       template<class Type>
+       struct listSparseMatrixFromR : vector<Eigen::SparseMatrix<Type> > {
+
+	 listSparseMatrixFromR();
+	 listSparseMatrixFromR(int n);
+	 listSparseMatrixFromR(SEXP x);
+
+	 template<class T>
+	 inline listSparseMatrixFromR(const listSparseMatrixFromR<T>& other) : vector<Eigen::SparseMatrix<Type> >(other.size()) {
+	   for(int i = 0; i < other.size(); ++i)
+	     (*this)(i) = Eigen::SparseMatrix<Type>(other(i));
+	 }
+       };
+       )
+
+SOURCE(
+       template<class Type>
+       listSparseMatrixFromR<Type>::listSparseMatrixFromR() : vector<Eigen::SparseMatrix<Type> >() {};
+       )
+
+SOURCE(
+       template<class Type>
+       listSparseMatrixFromR<Type>::listSparseMatrixFromR(int n) : vector<Eigen::SparseMatrix<Type> >(n) {};
+       )
+
+SOURCE(
+       template<class Type>
+       listSparseMatrixFromR<Type>::listSparseMatrixFromR(SEXP x){
+	 (*this).resize(LENGTH(x));
+	 for(int i=0; i<LENGTH(x); i++){
+	   SEXP sm = VECTOR_ELT(x, i);
+	   (*this)(i) = tmbutils::asSparseMatrix<Type>(sm);
+	 }
+       }
+       )
+
+SAM_SPECIALIZATION(struct listSparseMatrixFromR<double>);
+SAM_SPECIALIZATION(struct listSparseMatrixFromR<TMBad::ad_aug>);
 
 
 HEADER(
