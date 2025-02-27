@@ -102,7 +102,7 @@ do_evaluation = function(fits,
         message("fit_nr: ", fit_nr, "/", length(fits),
                 ", year: ", which(year == eval_years), "/", length(eval_years),
                 ", FAILED")
-        return(data.table(fit_type = names(fits)[fit_nr], year = year, convergence = FALSE))
+        return(data.table(fit_type = names(fits)[fit_nr], year = year, convergence = FALSE, convergence_sam = FALSE))
       }
       misc_info = list(
         logN = fit$pl$logN,
@@ -114,7 +114,8 @@ do_evaluation = function(fits,
       year_index = which(fit$prediction$year == year)
       res = data.table(
         fit_type = names(fits)[fit_nr],
-        convergence = (fit$opt$convergence == 0),
+        convergence = (fit$opt$nlminb_convergence == 0),
+        convergence_sam = (fit$opt$convergence == 0),
         year = year,
         obs = fit$prediction$obs,
         pred = fit$prediction$pred,

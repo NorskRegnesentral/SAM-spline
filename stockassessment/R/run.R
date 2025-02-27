@@ -171,6 +171,9 @@ sam.fit <- function(data, conf, parameters, newtonsteps=3, rm.unidentified=FALSE
     }
     opt$he <- optimHess(opt$par, obj$fn, obj$gr)
 
+    opt$nlminb_convergence <- opt$convergence
+    opt$convergence <- ifelse(max(abs(obj$gr(opt$par)))<1e-4,0,1)
+    
     repList <- doReporting(obj, opt, ignore.parm.uncertainty)
 
     ret <- c(repList, list(data=data, conf=conf, opt=opt, obj=obj, rep=rep, low=lower, hig=upper))
@@ -401,18 +404,23 @@ refit <- function(fit, newConf, startingValues, ...){
     ## Add missing parts from defcon
     dc <- defcon(fit2$data)
     nm <- setdiff(names(dc),names(fit2$conf))
-    fit2$conf[nm] <- dc[nm]
+    if(length(nm) > 0)
+        fit2$conf[nm] <- dc[nm]
     nms <- names(fit2$conf)
     fit2$conf <- lapply(nms, function(n){
+        ## Don't update.structure for configurations without a fixed size/dimension
+        if(n %in% c("keyXtraSd","keyScaledYears","keyParScaledYA","constRecBreaks","keyVarLogP"))
+            return(fit2$conf[[n]])
         update.structure(fit2$conf[[n]], dc[[n]])
     })
     names(fit2$conf) <- nms
     
     ## Update parameters
     dp <- defpar(fit2$data,fit2$conf)
-    for(i in intersect(names(dp),names(fit2$pl)))
+    for(i in intersect(names(dp),names(fit2$pl))){
         if(length(dp[[i]]) == length(fit2$pl[[i]]))
             dp[[i]] <- fit2$pl[[i]]
+    }
     if(!missing(startingValues)){
         for(i in intersect(names(dp),names(startingValues)))
             if(length(dp[[i]]) == length(startingValues[[i]])){

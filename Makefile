@@ -74,6 +74,10 @@ qi:	$(PACKAGE)/configure
 quick-install: $(CPP_SRC) $(PACKAGE)/configure $(R_FILES)
 	$(R) CMD INSTALL $(PACKAGE)
 
+quick-install-debug: $(CPP_SRC) $(PACKAGE)/configure $(R_FILES)
+	$(R) CMD INSTALL --configure-args='--enable-debug' $(PACKAGE)
+
+
 $(PACKAGE)/src/stockassessment.so: $(PACKAGE)/src/stockassessment.cpp $(CPP_SRC) $(PACKAGE)/configure
 	touch $(PACKAGE)/src/stockassessment.cpp
 	cd $(PACKAGE)/src; echo "library(TMB); compile('stockassessment.cpp','-O0 -g', libinit=FALSE)" | $(R) --slave
@@ -165,8 +169,8 @@ webtestone:
 	@rm -f $(ARG)/run/curver
 	@touch $(ARG)/data/*
 	@$(MAKE) -s -C $(ARG) model
-	@echo "load('$(ARG)/model.RData'); old<-fit[['pl']]; \
-	       load('$(ARG)/run/model.RData'); new<-fit[['pl']];\
+	@echo "load('$(ARG)/model.RData'); old<-tail(summary(fit),1); \
+	       load('$(ARG)/run/model.RData'); new<-tail(summary(fit),1);\
 	       cat('$(ARG)...',ifelse(all.equal(old,new,check.attributes=FALSE),'OK','FAIL'),'\n')"   | R --slave
 	@touch $(ARG)/OK
 

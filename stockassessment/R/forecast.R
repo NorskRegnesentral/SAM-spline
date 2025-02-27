@@ -76,8 +76,8 @@ forecast <- function(fit,
                      label=NULL, overwriteSelYears=NULL, deterministic=FALSE, processNoiseF=TRUE,  customWeights=NULL, customSel=NULL, lagR=FALSE, splitLD=FALSE, addTSB=FALSE, useSWmodel=(fit$conf$stockWeightModel>=1), useCWmodel=(fit$conf$catchWeightModel>=1), useMOmodel=(fit$conf$matureModel>=1), useNMmodel=(fit$conf$mortalityModel>=1), savesim=FALSE, cf.cv.keep.cv=matrix(NA, ncol=2*sum(fit$data$fleetTypes==0), nrow=length(catchval)), cf.cv.keep.fv=matrix(NA, ncol=2*sum(fit$data$fleetTypes==0), nrow=length(catchval)), cf.keep.fv.offset=matrix(0, ncol=sum(fit$data$fleetTypes==0), nrow=length(catchval)), estimate=median){
     ## if(sum(fit$data$fleetTypes==0) > 1)
     ##     stop("Forecast for multi fleet models not implemented yet")
-
-    estimateLabel <- deparse1(substitute(estimate))
+    dp1<-function (expr, collapse = " ", width.cutoff = 500L, ...) paste(deparse(expr, width.cutoff, ...), collapse = collapse)
+    estimateLabel <- dp1(substitute(estimate))
     idxN <- 1:nrow(fit$rep$nvar)
     
     idxF <- 1:nrow(fit$rep$fvar)+nrow(fit$rep$nvar)
@@ -107,6 +107,8 @@ forecast <- function(fit,
         stop("For each forecast year exactly one of fscale, catchval or fval must be specified (all others must be set to NA)")
     }
 
+    if(!is.null(overwriteSelYears)&(noCatchFleets!=1))stop("overwriteSelYears option can only be used for single fleet models")
+    
     if(!is.null(overwriteSelYears)){
         fromto <- fit$conf$fbarRange-(fit$conf$minAge-1)  
         Ftab <- faytable(fit)
@@ -114,11 +116,13 @@ forecast <- function(fit,
         fixedsel <- fixedsel/mean(fixedsel[fromto[1]:fromto[2]])
     }
 
+    if(!is.null(customSel)&(noCatchFleets!=1))stop("customSel can only be used for single fleet models")
+    
     if(!is.null(customSel)){
         fromto <- fit$conf$fbarRange-(fit$conf$minAge-1)  
         customSel <- customSel/mean(customSel[fromto[1]:fromto[2]])
     }
-
+    
     odat<-fit$obj$env$data
     opar<-fit$obj$env$parList(par = fit$obj$env$last.par.best)
     omap<-fit$obj$env$map
@@ -188,13 +192,13 @@ forecast <- function(fit,
                 fromto <- fit$conf$fbarRange-(fit$conf$minAge-1)    
                 thisfbar<-mean(ret[fromto[1]:fromto[2]])
                 ret<-fixedsel*thisfbar
-                if(!is.null(customSel)){
-                    fromto <- fit$conf$fbarRange-(fit$conf$minAge-1)    
-                    thisfbar<-mean(ret[fromto[1]:fromto[2]])
-                    ret<-customSel*thisfbar
-                }
-                FF[]<-NA
             }
+            if(!is.null(customSel)){
+                fromto <- fit$conf$fbarRange-(fit$conf$minAge-1)    
+                thisfbar<-mean(ret[fromto[1]:fromto[2]])
+                ret<-customSel*thisfbar
+            }
+            FF[]<-lapply(fleet, function(x)ret)
         }
         attr(ret,"byFleet") <- do.call(cbind,FF)
         ret
@@ -270,7 +274,13 @@ forecast <- function(fit,
         }
         xx <- rep(NA,length=length(x))
         xx[idxN] <- log(N)
-        xx[idxF] <- x[idxF]+log(scale)
+                                        #if(inyear==FALSE)browser()
+        if((noCatchFleets==1)){
+          kk<-fit$conf$keyLogFsta[1,]+1
+          xx[idxF] <- log(tapply(F[kk>0],kk[kk>0],mean))[idxF-min(idxF)+1]+log(scale)
+        }else{
+          xx[idxF] <- x[idxF]+log(scale)
+        }
         return(xx)
     }
 
@@ -351,14 +361,14 @@ forecast <- function(fit,
     sim<-rmvnorm(nosim, mu=est, Sigma=cov)
 
     if(is.null(overwriteSelYears) & is.null(customSel))  
-        if(!isTRUE(all.equal(est,getState(getN(est),getF(est)))))
+        if(!isTRUE(all.equal(unname(est),unname(getState(getN(est),getF(est))))))
             stop("Sorry somthing is wrong here (check code for getN, getF, and getState)")  
     doAve <- function(x){
         if(length(dim(x))==2){
-            ret <- colMeans(x[rownames(x)%in%ave.years,,drop=FALSE])
+            ret <- colMeans(x[rownames(x)%in%ave.years,,drop=FALSE], na.rm=TRUE)
         }
         if(length(dim(x))==3){
-            ret <- apply(x[rownames(x)%in%ave.years,,,drop=FALSE],c(2,3),mean)
+            ret <- apply(x[rownames(x)%in%ave.years,,,drop=FALSE],c(2,3),mean, na.rm=TRUE)
         }
         ret
     }
@@ -378,6 +388,7 @@ forecast <- function(fit,
             }else{
                 ret <- x[which(rownames(x)==y),,]
             }
+            ret[is.na(ret)]<-ave[is.na(ret)]
         }else{
             ret <- ave
         }
@@ -416,7 +427,6 @@ forecast <- function(fit,
             if(deterministic){procVar<-procVar*0}
             if(!is.null(overwriteSelYears)){nn<-length(fit$conf$keyLogFsta[1,]); procVar[-c(1:nn),-c(1:nn)] <- 0}
             if(!is.null(customSel)){nn<-length(fit$conf$keyLogFsta[1,]); procVar[-c(1:nn),-c(1:nn)] <- 0}
-            
             if(all(fit$conf$corFlag <3)){
                 sim <- sim + rmvnorm(nosim, mu=rep(0,nrow(procVar)), Sigma=procVar)
             }else if(length(fit$conf$corFlag)==1 && fit$conf$corFlag[1] ==3){

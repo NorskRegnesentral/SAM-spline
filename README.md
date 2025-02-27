@@ -15,3 +15,8 @@ forward-validation studies are also performed in this script. The second script,
 `model_fitting.R`. Finally, the script `helper_functions.R` consists of a set of helper functions
 that are used in the two previously mentioned scripts.
 
+Recent changes were made to the SAM package while we were developing our spline models. These recent
+changes have been merged into this fork, and minor changes have been made to the code so that the
+spline models will be usable with the newest version of SAM. However, the actual version of SAM that
+was used for creating all the results in the paper, can be found by checking out the tag
+"SAM-spline-paper", i.e. `git checkout tags/SAM-spline-paper`.
