@@ -74,7 +74,8 @@ do_evaluation = function(fits,
           stopifnot(nrow(obs) == length(catch_mean_weight))
           obs$est_weight = obs$obs * catch_mean_weight
           tot_weight = sum(obs$est_weight)
-          conditional_pred = tryCatch({
+          conditional_pred = tryCatch(
+          {
             set.seed(1)
             # This is a forecast for the values at the end of the year
             fc = forecast(
@@ -84,9 +85,12 @@ do_evaluation = function(fits,
             )
             pred_mean = apply(fc[[1]]$catchatage, 1, mean)
             pred_mean
-          }, error = function(e) NA)
+          },
+          error = function(e) NA
+          )
+          all_ages = sort(unique(fit$data$aux[, "age"]))
           conditional_pred = data.table(
-            conditional_pred = conditional_pred,
+            conditional_pred = conditional_pred[all_ages %in% obs$age],
             age = obs$age,
             fleet = obs$fleet
           )
