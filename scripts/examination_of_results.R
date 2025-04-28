@@ -18,13 +18,20 @@ function_path = file.path(sam_dir, "scripts", "helper_functions.R")
 source(function_path)
 
 # ==============================================================================
-# Load all the result data and create some plots
+# Load all the result data
 # ==============================================================================
 result_files = list.files(results_dir, full.names = TRUE)
 
 # Load all the model fits
 fits = lapply(result_files, function(x) readRDS(x)$fits)
 names(fits) = sub("(.+).rds", "\\1", basename(result_files))
+
+sapply(fits, function(x) sapply(x, class) == "sam") |>
+  apply(1, sum)
+
+# ==============================================================================
+# Create a lot of different plots
+# ==============================================================================
 
 # Plot all of the estimated Q/sigma/omega params
 plots = list()
@@ -37,6 +44,91 @@ for (i in seq_along(result_files)) {
 pdf(file.path(image_dir, "params.pdf"))
 for (plot in plots) print(plot)
 dev.off()
+
+cod_final_param_plot = local({
+  file = grep("NEA_cod", result_files, value = TRUE)
+  res = readRDS(file)
+  name = sub("(.+).rds", "\\1", basename(file))
+  model_names = c("final")
+  new_names = c("Final")
+  fits = res$fits[names(res$fits) %in% model_names]
+  for (j in seq_along(model_names)) {
+    if (model_names[j] %in% names(fits)) names(fits)[names(fits) == model_names[j]] = new_names[j]
+  }
+  areas = c("Baltic Sea", "North Sea", "North-East Arctic", "Faroe Plateau",
+            "Celtic Sea", "Widely distributed")
+  area_codes = c("BS", "NS", "NEA", "F", "CSWS", "WMS")
+  area_code = strsplit(name, "_")[[1]][1]
+  area = areas[area_codes == area_code]
+  stock = strsplit(name, "_")[[1]][2]
+  toupper_first = function(x) paste0(toupper(substr(x, 1, 1)), substr(x, 2, nchar(x)))
+  stock = toupper_first(stock)
+  plot = plot_fits(fits, pretty = TRUE) +
+    geom_line(aes(alpha = fit_type)) +
+    labs(alpha = "", col = "", size = "", x = "$a$", y = "") +
+    guides(col = "none", size = "none", alpha = "none") +
+    scale_y_continuous(breaks = -30:20, minor_breaks = NULL) +
+    scale_alpha_manual(values = c(0, 1, 1, 1) * .5) +
+    theme(text = element_text(size = 15))
+  plot
+})
+plot_tikz(
+  plot = cod_final_param_plot,
+  width = 9,
+  height = 5,
+  file = file.path(image_dir, "cod_params.pdf")
+)
+
+# Plot Q/sigma/omega params in a pretty format, for the paper
+plots = list()
+for (i in seq_along(result_files)) {
+  res = readRDS(result_files[i])
+  name = sub("(.+).rds", "\\1", basename(result_files[i]))
+  plots[[name]] = local({
+    model_names = c("final", "maximal", "spline")
+    new_names = c("Final", "Maximal", "Spline")
+    fits = res$fits[names(res$fits) %in% model_names]
+    for (j in seq_along(model_names)) {
+      if (model_names[j] %in% names(fits)) names(fits)[names(fits) == model_names[j]] = new_names[j]
+    }
+    areas = c("Baltic Sea", "North Sea", "North-East Arctic", "Faroe Plateau",
+              "Celtic Sea", "Widely distributed")
+    area_codes = c("BS", "NS", "NEA", "F", "CSWS", "WMS")
+    area_code = strsplit(name, "_")[[1]][1]
+    area = areas[area_codes == area_code]
+    stock = strsplit(name, "_")[[1]][2]
+    toupper_first = function(x) paste0(toupper(substr(x, 1, 1)), substr(x, 2, nchar(x)))
+    stock = toupper_first(stock)
+    plot = plot_fits(fits, pretty = TRUE) +
+      geom_line(aes(alpha = fit_type)) +
+      labs(alpha = "", col = "", size = "", x = "$a$", y = "") +
+      theme(legend.position = "top") +
+      scale_y_continuous(breaks = -30:20) +
+      scale_alpha_manual(values = c(0, rep(1, length(model_names))) * .5) +
+      theme(text = element_text(size = 15))
+    plot
+  })
+}
+myplots = plots[grep("(BS_plaice)|(NEA_cod)|(CSWS_plaice)", names(plots))]
+myplot = patchwork::wrap_plots(
+  myplots[c(3, 2, 1)],
+  nrow = 3,
+  guides = "collect",
+  tag_level = "new"
+) &
+  theme(
+    legend.position = "top",
+    strip.text = element_text(size = rel(.7)),
+    axis.text.x = element_text(size = rel(.8)),
+    axis.text.y = element_text(size = rel(.8))
+  ) &
+  plot_annotation(tag_levels = "A", tag_suffix = ")")
+plot_tikz(
+  plot = myplot,
+  width = 8,
+  height = 10,
+  file = file.path(image_dir, "params_selected.pdf")
+)
 
 # Plot estimates of SSB for each fish stock
 ssb_df = lapply(
@@ -65,7 +157,6 @@ ssb_df = lapply(
   }
 )
 ssb_df = rbindlist(ssb_df)
-ssb_df = ssb_df[name != "base"]
 plots = list()
 for (s in unique(ssb_df$stock)) {
   plots[[s]] = ggplot(ssb_df[stock == s]) +
@@ -84,161 +175,17 @@ pdf(file.path(image_dir, "ssb.pdf"))
 for (plot in plots) print(plot)
 dev.off()
 
-# Plot Q/sigma/omega params in a pretty format, for the paper
-plots = list()
-for (i in seq_along(result_files)) {
-  res = readRDS(result_files[i])
-  name = sub("(.+).rds", "\\1", basename(result_files[i]))
-  plots[[name]] = local({
-    model_names = c("official", "maximal", "spline1", "spline2")
-    new_names = c("Official", "Maximal", "Spline1", "Spline2")
-    fits = res$fits[names(res$fits) %in% model_names]
-    for (j in seq_along(model_names)) {
-      if (model_names[j] %in% names(fits)) names(fits)[names(fits) == model_names[j]] = new_names[j]
-    }
-    areas = c("Baltic Sea", "North Sea", "North-East Arctic", "Faroe Plateau",
-              "Celtic Sea", "Widely distributed")
-    area_codes = c("BS", "NS", "NEA", "F", "CSWS", "WMS")
-    area_code = strsplit(name, "_")[[1]][1]
-    area = areas[area_codes == area_code]
-    stock = strsplit(name, "_")[[1]][2]
-    toupper_first = function(x) paste0(toupper(substr(x, 1, 1)), substr(x, 2, nchar(x)))
-    stock = toupper_first(stock)
-    plot = plot_fits(fits, pretty = TRUE) +
-      geom_line(aes(alpha = fit_type)) +
-      labs(alpha = "", col = "", size = "", x = "$a$", y = "") +
-      theme(legend.position = "top") +
-      scale_y_continuous(breaks = -30:20) +
-      scale_alpha_manual(values = c(0, rep(1, length(model_names))) * .5) +
-      theme(text = element_text(size = 15))
-    plot
-  })
-}
-for (i in seq_along(result_files)) {
-  res = readRDS(result_files[i])
-  name = sub("(.+).rds", "\\1", basename(result_files[i]))
-  plots[[paste0(name, "_", 2)]] = local({
-    model_names = c("official")
-    new_names = c("Official")
-    fits = res$fits[names(res$fits) %in% model_names]
-    for (j in seq_along(model_names)) {
-      if (model_names[j] %in% names(fits)) names(fits)[names(fits) == model_names[j]] = new_names[j]
-    }
-    areas = c("Baltic Sea", "North Sea", "North-East Arctic", "Faroe Plateau",
-              "Celtic Sea", "Widely distributed")
-    area_codes = c("BS", "NS", "NEA", "F", "CSWS", "WMS")
-    area_code = strsplit(name, "_")[[1]][1]
-    area = areas[area_codes == area_code]
-    stock = strsplit(name, "_")[[1]][2]
-    toupper_first = function(x) paste0(toupper(substr(x, 1, 1)), substr(x, 2, nchar(x)))
-    stock = toupper_first(stock)
-    plot = plot_fits(fits, pretty = TRUE) +
-      geom_line(aes(alpha = fit_type)) +
-      labs(alpha = "", col = "", size = "", x = "$a$", y = "") +
-      guides(col = "none", size = "none", alpha = "none") +
-      scale_y_continuous(breaks = -30:20, minor_breaks = NULL) +
-      scale_alpha_manual(values = c(0, 1, 1, 1) * .5) +
-      theme(text = element_text(size = 15))
-    plot
-  })
-}
-for (i in seq_along(result_files)) {
-  res = readRDS(result_files[i])
-  name = sub("(.+).rds", "\\1", basename(result_files[i]))
-  plots[[paste0(name, "_", 3)]] = local({
-    model_names = c("official", "maximal", "spline1", "spline2")
-    new_names = c("Official", "Maximal", "Spline1", "Spline2")
-    fits = res$fits[names(res$fits) %in% model_names]
-    for (j in seq_along(model_names)) {
-      if (model_names[j] %in% names(fits)) names(fits)[names(fits) == model_names[j]] = new_names[j]
-    }
-    areas = c("Baltic Sea", "North Sea", "North-East Arctic", "Faroe Plateau",
-              "Celtic Sea", "Widely distributed")
-    area_codes = c("BS", "NS", "NEA", "F", "CSWS", "WMS")
-    area_code = strsplit(name, "_")[[1]][1]
-    area = areas[area_codes == area_code]
-    stock = strsplit(name, "_")[[1]][2]
-    toupper_first = function(x) paste0(toupper(substr(x, 1, 1)), substr(x, 2, nchar(x)))
-    stock = toupper_first(stock)
-    plot = plot_fits(fits, pretty = TRUE) +
-      geom_line(aes(alpha = fit_type)) +
-      labs(alpha = "", col = "", size = "", x = "$a$", y = "", fill = "") +
-      theme(legend.position = "top") +
-      scale_y_continuous(breaks = -30:20) +
-      scale_alpha_manual(values = c(0, rep(1, length(model_names))) * .5) +
-      geom_ribbon(aes(ymin = value - 1.96 * sd, ymax = value + 1.96 * sd, fill = fit_type), alpha = .2, col = NA) +
-      theme(text = element_text(size = 15))
-    plot
-  })
-}
-plot_tikz(
-  plot = plots[grep("(BS_plaice)|(NEA_cod)|(CSWS_plaice)", names(plots))],
-  width = 9,
-  height = 5,
-  file = file.path(image_dir, "params_selected.pdf")
-)
-
-cod_official_param_plot = local({
-  file = grep("NEA_cod", result_files, value = TRUE)
-  res = readRDS(file)
-  name = sub("(.+).rds", "\\1", basename(file))
-  model_names = c("official")
-  new_names = c("Official")
-  fits = res$fits[names(res$fits) %in% model_names]
-  for (j in seq_along(model_names)) {
-    if (model_names[j] %in% names(fits)) names(fits)[names(fits) == model_names[j]] = new_names[j]
-  }
-  areas = c("Baltic Sea", "North Sea", "North-East Arctic", "Faroe Plateau",
-            "Celtic Sea", "Widely distributed")
-  area_codes = c("BS", "NS", "NEA", "F", "CSWS", "WMS")
-  area_code = strsplit(name, "_")[[1]][1]
-  area = areas[area_codes == area_code]
-  stock = strsplit(name, "_")[[1]][2]
-  toupper_first = function(x) paste0(toupper(substr(x, 1, 1)), substr(x, 2, nchar(x)))
-  stock = toupper_first(stock)
-  plot = plot_fits(fits, pretty = TRUE) +
-    geom_line(aes(alpha = fit_type)) +
-    labs(alpha = "", col = "", size = "", x = "$a$", y = "") +
-    guides(col = "none", size = "none", alpha = "none") +
-    scale_y_continuous(breaks = -30:20, minor_breaks = NULL) +
-    scale_alpha_manual(values = c(0, 1, 1, 1) * .5) +
-    theme(text = element_text(size = 15))
-  plot
-})
-plot_tikz(
-  plot = cod_official_param_plot,
-  width = 9,
-  height = 5,
-  file = file.path(image_dir, "cod_params.pdf")
-)
-
-
-# Do the same once more, but with all three chosen fish stocks on the same page
-myplots = plots[grep("(BS_plaice)|(NEA_cod)|(CSWS_plaice)", names(plots))]
-myplot = patchwork::wrap_plots(
-  myplots[c(3, 2, 1)],
-  nrow = 3,
-  guides = "collect",
-  tag_level = "new"
-) &
-  theme(
-    legend.position = "top",
-    strip.text = element_text(size = rel(.7)),
-    axis.text.x = element_text(size = rel(.8)),
-    axis.text.y = element_text(size = rel(.8))
-  ) &
-  plot_annotation(tag_levels = "A", tag_suffix = ")")
-plot_tikz(
-  plot = myplot,
-  width = 8,
-  height = 10,
-  file = file.path(image_dir, "params_selected2.pdf")
-)
-
 # Plot SSB for BS_plaice in a pretty format
 ff = fits[[grep("BS_plaice", names(fits))]]
-model_names = c("official", "maximal", "spline1", "spline2", "official2")
-new_names = c("Official", "Maximal", "Spline1", "Spline2", "Official 2")
+# ff$final2 = local({
+#   conf = ff$final$conf
+#   conf$keyLogFpar[2, ] = c(0:5, -1)
+#   conf$keyLogFpar[3, ] = c(6:11, -1)
+#   par = stockassessment::defpar(ff$final$data, conf)
+#   my_sam_fit(data, conf, par)
+# })
+model_names = c("final", "maximal", "spline", "final2")
+new_names = c("Final", "Maximal", "Spline", "Modified final")
 ssb_df = lapply(
   seq_along(ff),
   function(i) {
@@ -262,8 +209,8 @@ plot = ggplot(ssb_df) +
   geom_line(aes(x = y, y = value, group = name, col = name)) +
   labs(col = "", x = "Year", fill = "", y = "SSB") +
   scale_y_continuous(
-    breaks = seq(0, 1e5, by = 2e4),
-    labels = paste0("$", c(0, paste(seq(2, 8, by = 2), "\\cdot 10^4"), "10^5"), "$")
+    breaks = seq(0, 2e5, by = 2e4),
+    labels = paste0("$", c(0, paste(seq(2, 8, by = 2), "\\cdot 10^4"), "10^5", paste(seq(1.2, 2, by = .2), "\\cdot 10^5")), "$")
   ) +
   theme_light() +
   theme(
@@ -278,6 +225,51 @@ plot_tikz(
   height = 5,
   file = file.path(image_dir, "bs-plaice_ssb.pdf")
 )
+
+# Plot estimates of Fbar for each fish stock
+fbar_df = lapply(
+  seq_along(fits),
+  FUN = function(i) {
+    df = lapply(
+      seq_along(fits[[i]]),
+      function(j) {
+        fit = fits[[i]][[j]]
+        index = which(names(fit$sdrep$value) == "logfbar")
+        if (length(index) == 0) {
+          return(data.table(name = names(fits[[i]])[j], stock = names(fits)[i]))
+        }
+        logfbar = fit$sdrep$value[index]
+        ci = logfbar + fit$sdrep$sd[index] %o% c(-1.96, 1.96)
+        data.table(
+          value = exp(logfbar),
+          lower = exp(ci[, 1]),
+          upper = exp(ci[, 2]),
+          y = fit$data$years,
+          name = names(fits[[i]])[j],
+          stock = names(fits)[i]
+        )
+      })
+    rbindlist(df, fill = TRUE)
+  }
+)
+fbar_df = rbindlist(fbar_df)
+plots = list()
+for (s in unique(fbar_df$stock)) {
+  plots[[s]] = ggplot(fbar_df[stock == s]) +
+    geom_ribbon(aes(x = y, ymin = lower, ymax = upper, fill = name), alpha = .3) +
+    geom_line(aes(x = y, y = value, group = name, col = name)) +
+    labs(col = "", x = "Year", fill = "", y = "Fbar", title = s) +
+    theme_light() +
+    theme(
+      strip.text = element_text(colour = "black"),
+      strip.background = element_rect(colour = "#f0f0f0", fill = "#f0f0f0"),
+      text = element_text(size = 16),
+      legend.position = "top"
+    )
+}
+pdf(file.path(image_dir, "fbar.pdf"))
+for (plot in plots) print(plot)
+dev.off()
 
 # Plot all SSB estimates for all model fits from the cross/forward-evaluation
 cv_ssb = lapply(result_files, function(x) {
@@ -312,10 +304,10 @@ cv_ssb = lapply(result_files, function(x) {
         stock = sub("\\.rds", "", basename(x))
       )
     })
-  df2 = rbindlist(df2, fill = TRUE)
+  df2 = rbindlist(df2, fill = TRUE, use.names = TRUE)
   rbind(df, df2)
 })
-cv_ssb = rbindlist(cv_ssb)[fit_type != "base"]
+cv_ssb = rbindlist(cv_ssb, use.names = TRUE)[fit_type != "base"]
 plots = list()
 for (s in unique(cv_ssb$stock)) {
   plots[[s]] = ggplot(cv_ssb[stock == s]) +
@@ -327,34 +319,174 @@ for (plot in plots) print(plot)
 dev.off()
 
 # Count the number of disagreeing SSB values for the different stocks for BS_plaice_2022
-cv_ssb[eval_type == "crossval" & stock == "BS_plaice_2022" & fit_type == "spline1" & year == 2010, sort(exp(logssb))]
-cv_ssb[eval_type == "crossval" & stock == "BS_plaice_2022" & fit_type == "spline2" & year == 2010, sort(exp(logssb))]
+cv_ssb[eval_type == "crossval" & stock == "BS_plaice_2022" & fit_type == "spline" & year == 2010, sort(exp(logssb))]
 cv_ssb[eval_type == "crossval" & stock == "BS_plaice_2022" & fit_type == "maximal" & year == 2010, sort(exp(logssb))]
-cv_ssb[eval_type == "crossval" & stock == "BS_plaice_2022" & fit_type == "official" & year == 2010, sort(exp(logssb))]
-
+cv_ssb[eval_type == "crossval" & stock == "BS_plaice_2022" & fit_type == "final" & year == 2010, sort(exp(logssb))]
 
 # ==============================================================================
-# Examine RMSE values
+# Examine simulation results
 # ==============================================================================
 
-# Load all RMSE values from the cross/forward-validation
-eval = lapply(result_files, function(x) {
-  message(x)
-  data = readRDS(x)
-  eval = rbind(
-    rbindlist(data$forward, fill = TRUE)[, let(eval_type = "forward")],
-    rbindlist(data$crossval, fill = TRUE)[, let(eval_type = "crossval")],
-    fill = TRUE
+sim_data = lapply(
+  X = result_files,
+  FUN = function(x) {
+    data = readRDS(x)
+    out = data$simulations
+    if (is.null(out)) return(NULL)
+    out$stock = sub("(.+).rds", "\\1", basename(x))
+    out$region = strsplit(out$stock[1], "_")[[1]][1]
+    out
+  })
+sim_data = rbindlist(sim_data)
+
+tmp = unique(sim_data[, .(
+  m = mean(pred), s = mean(sd)
+),
+by = c("model", "sim_nr", "simulation_model", "stock", "convergence")]
+)
+tmp[, let(bad_fit = (is.na(convergence) | convergence != 0 | is.nan(m) | is.nan(s)))]
+tmp[, let(all_good = all(!bad_fit)), by = c("stock", "sim_nr", "simulation_model")]
+
+tmp[, sum(bad_fit), by = "model"]
+unique(tmp[, .(all_good, stock, sim_nr, simulation_model)])[, .(
+  n_good = sum(all_good),
+  n_bad = sum(!all_good),
+  .N
+)]
+
+tmp[, .(
+  n_crash = sum(is.na(convergence)),
+  n_no_convergence = sum(convergence != 0, na.rm = TRUE),
+  n_nan = sum(is.nan(m) | is.nan(s)),
+  n_bad_total = sum(convergence != 0 | is.na(convergence) | is.nan(m) | is.nan(s), na.rm = TRUE)
+  ),
+by = "model"]
+
+tmp[, .(n_bad = sum(bad_fit)), by = c("model", "simulation_model")] |>
+  dcast(simulation_model ~ model)
+
+tmp[, .(n_bd = sum(bad_fit)), by = c("model", "stock")] |>
+  dcast(stock ~ model)
+
+sim_data = merge(sim_data, tmp[, .(model, sim_nr, simulation_model, stock, all_good)], all.y = TRUE)
+sim_data = sim_data[all_good == TRUE]
+
+sim_eval = sim_data[, .(
+  rmse = sqrt(mean((exp(pred) - exp(truth))^2)),
+  rmse2 = sqrt(mean((pred - truth)^2))
+), by = c("model", "stock", "simulation_model", "tag")]
+sim_eval[, let(
+  rmse = rmse / rmse[model == simulation_model],
+  rmse2 = rmse2 / rmse2[model == simulation_model]
+),
+by = c("stock", "simulation_model", "tag")]
+sim_eval = sim_eval[model != simulation_model]
+sim_eval = melt(sim_eval, measure.vars = c("rmse", "rmse2"))
+sim_eval[variable == "rmse", let(tag = ifelse(tag == "logssb", "SSB", "$\\bar F$"))]
+sim_eval[variable == "rmse2", let(tag = ifelse(tag == "logssb", "log SSB", "$\\log \\bar F$"))]
+sim_eval[, let(
+  model = factor(
+    model,
+    levels = c("final", "maximal", "spline"),
+    labels = c("Final", "Maximal", "Spline")
+  ),
+  simulation_model = factor(
+    simulation_model,
+    levels = c("final", "maximal", "spline"),
+    labels = c("Final", "Maximal", "Spline")
   )
-  eval$stock = sub("(.+).rds", "\\1", basename(x))
-  eval$region = strsplit(eval$stock[1], "_")[[1]][1]
-  n_par = sapply(data$fits, function(x) length(x$opt$par))
-  eval$n_par = n_par[eval$fit_type]
-  eval
-})
-eval = rbindlist(eval, use.names = TRUE)
+)]
 
+plot = ggplot(sim_eval) +
+  geom_boxplot(aes(x = simulation_model, y = value, col = model)) +
+  facet_wrap(~ tag, nrow = 1) +
+  geom_hline(yintercept = 1) +
+  lims(y = c(0.75, 1.65)) +
+  theme_light() +
+  labs(x = "True model", y = "Standardised RMSE", col = "Fitted model") +
+  theme(
+    strip.text = element_text(colour = "black"),
+    strip.background = element_rect(colour = "#f0f0f0", fill = "#f0f0f0"),
+    text = element_text(size = 16),
+    axis.text.x = element_text(angle = 45, vjust = .5),
+    legend.position = "top"
+  )
+
+plot_tikz(
+  plot = plot,
+  file = file.path(image_dir, "simulation_rmse.pdf"),
+  width = 10,
+  height = 3.8
+)
+  
+probs = seq(.05, .95, by = .05)
+
+coverage_data = list()
+for (prob in probs) {
+  z = qnorm(1 - (1 - prob) / 2)
+  coverage_data[[length(coverage_data) + 1]] = sim_data[, .(
+    coverage = mean((pred - sd * z) <= truth & truth <= (pred + sd * z)),
+    prob = prob
+  ),
+  by = c("model", "simulation_model", "stock", "tag")]
+  #by = c("model", "simulation_model")]
+}
+coverage_data = rbindlist(coverage_data)
+coverage_data[, let(
+  tag = factor(
+    tag,
+    levels = c("logssb", "logfbar"),
+    labels = c("SSB", "$\\bar F$")
+  ),
+  model = factor(
+    model,
+    levels = c("final", "maximal", "spline"),
+    labels = paste("Fitted model:\n", c("Final", "Maximal", "Spline"))
+  ),
+  simulation_model = factor(
+    simulation_model,
+    levels = c("final", "maximal", "spline"),
+    labels = paste("True model:", c("Final", "Maximal", "Spline"))
+  )
+)]
+
+plot = ggplot(coverage_data[tag == "SSB"]) +
+  geom_boxplot(aes(x = prob, y = coverage, group = prob)) +
+  geom_abline(slope = 1, intercept = 0) +
+  coord_equal() +
+  theme_light() +
+  theme(
+    strip.text = element_text(colour = "black"),
+    strip.background = element_rect(colour = "#f0f0f0", fill = "#f0f0f0"),
+    strip.text.y = element_text(angle = 0)
+  ) +
+  labs(x = "$p$", y = "Coverage probability") +
+  scale_x_continuous(
+    breaks = seq(0, 1, by = .25),
+    labels = c("0", "0.25", "0.50", "0.75", "1"),
+    limits = c(0, 1)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = .25),
+    labels = c("0", "0.25", "0.50", "0.75", "1"),
+    limits = c(0, 1)
+  ) +
+  facet_grid(model ~ simulation_model)
+  #facet_wrap(~model)
+
+plot_tikz(
+  plot = plot,
+  file = file.path(image_dir, "simulation_coverage.pdf"),
+  width = 6,
+  #width = 11,
+  height = 5.5
+)
+
+
+# ==============================================================================
 # Create a nice latex-table that describes all the 17 fish stocks
+# ==============================================================================
+
 latex_table = local({
   toupper_first = function(x) paste0(toupper(substr(x, 1, 1)), substr(x, 2, nchar(x)))
   areas = c("Baltic Sea", "North Sea", "North-East Arctic", "Faroe Plateau",
@@ -403,6 +535,27 @@ latex_table = local({
 })
 cat(latex_table)
 
+# ==============================================================================
+# Examine RMSE values
+# ==============================================================================
+
+# Load all RMSE values from the cross/forward-validation
+eval = lapply(result_files, function(x) {
+  message(x)
+  data = readRDS(x)
+  eval = rbind(
+    rbindlist(data$forward, fill = TRUE)[, let(eval_type = "forward")],
+    rbindlist(data$crossval, fill = TRUE)[, let(eval_type = "crossval")],
+    fill = TRUE
+  )
+  eval$stock = sub("(.+).rds", "\\1", basename(x))
+  eval$region = strsplit(eval$stock[1], "_")[[1]][1]
+  n_par = sapply(data$fits, function(x) length(x$opt$par))
+  eval$n_par = n_par[eval$fit_type]
+  eval
+})
+eval = rbindlist(eval, use.names = TRUE)
+
 # Examine which models that converged for the different data subsets
 convergence_stats = unique(eval[, .(
   year, fit_type, convergence, eval_type, stock, region
@@ -414,7 +567,24 @@ convergence_stats = unique(eval[, .(
   n_total = .N
 ), by = .(fit_type)][, let(percentage = round(n_convergence / n_total, 3) * 100)][]
 convergence_stats
+convergence_stats$n_all_convergence[1]
 convergence_stats$n_all_convergence[1] / convergence_stats$n_total[1]
+
+eval[, .N, by = "fit_type"]
+dcast(eval[, .N, by = c("fit_type", "stock")], stock ~ fit_type, value.var = "N")
+
+unique(eval[, .(
+  year, fit_type, convergence, eval_type, stock, region
+)])[, let(
+  all_convergence = all(convergence)
+), by = .(year, eval_type, stock, region)][, .(
+  n_convergence = sum(convergence),
+  n_all_convergence = sum(all_convergence),
+  n_total = .N
+), by = .(stock, fit_type)][, let(percentage = round(n_convergence / n_total, 3) * 100)][, .(stock, percentage, fit_type)] |>
+  dcast(stock ~ fit_type, value.var = "percentage")
+
+# log(a + 1) and log(a + .1), and especially log(a + .01), is worse for spline convergence than sqrt(a)
 
 # Only keep results from the data subsets where all the competing models converged
 eval[, let(all_convergence = all(convergence)), by = c("year", "stock", "eval_type")]
@@ -425,23 +595,26 @@ score = local({
   eval = copy(eval)[, let(fleet_type = ifelse(fleet == 1, "catch", "survey"))]
   score = eval[, .(
     rmse = sqrt(mean((exp(obs) - exp(pred))^2, na.rm = TRUE)),
-    conditional_rmse = sqrt(mean((exp(obs) - conditional_pred)^2, na.rm = TRUE))
-    #conditional_rmse2 = sqrt(mean((exp(obs) / sum(exp(obs), na.rm = TRUE) - conditional_pred / sum(conditional_pred, na.rm = TRUE))^2, na.rm = TRUE)),
+    rmse2 = sqrt(mean((obs - pred)^2, na.rm = TRUE)),
+    conditional_rmse = sqrt(mean((exp(obs) - exp(conditional_pred))^2, na.rm = TRUE)),
+    conditional_rmse2 = sqrt(mean((obs - conditional_pred)^2, na.rm = TRUE))
   ), by = c("fit_type", "fleet_type", "stock", "eval_type")]
   score[, let(
-    rmse = rmse / rmse[fit_type == "official"],
-    conditional_rmse = conditional_rmse / conditional_rmse[fit_type == "official"]
+    rmse = rmse / rmse[fit_type == "final"],
+    rmse2 = rmse2 / rmse2[fit_type == "final"],
+    conditional_rmse = conditional_rmse / conditional_rmse[fit_type == "final"],
+    conditional_rmse2 = conditional_rmse2 / conditional_rmse2[fit_type == "final"]
   ), by = c("fleet_type", "stock", "eval_type")]
-  score = score[fit_type != "official"]
+  score = score[fit_type != "final"]
   score
 })
 
 # Remove the stocks where it makes no sense to do conditional prediction,
 # due to a large amounts of missing observations
-score[stock %in% c("F_saithe_2023", "F_haddock_2023"), let(conditional_rmse = NA)]
+score[stock %in% c("F_saithe_2023", "F_haddock_2023"), let(conditional_rmse = NA, conditional_rmse2 = NA)]
 
 # Print some stats for the RMSE scores. How often do the different models beat the
-# official model? I.e., how often do they have a standardised RMSE < 1
+# final model? I.e., how often do they have a standardised RMSE < 1
 message("\nMean forecast rmse:")
 score[eval_type == "forward", .(
   good_percentage = round(mean(conditional_rmse < 1, na.rm = TRUE), digits = 2)
@@ -454,6 +627,12 @@ score[, .(
 ),
 by = c("fit_type", "fleet_type", "eval_type")] |>
   dcast(eval_type + fleet_type ~ fit_type, value.var = "good_percentage")
+message("\nlog-RMSE:")
+score[, .(
+  good_percentage = round(mean(rmse2 < 1, na.rm = TRUE), digits = 2)
+),
+by = c("fit_type", "fleet_type", "eval_type")] |>
+  dcast(eval_type + fleet_type ~ fit_type, value.var = "good_percentage")
 
 
 # Create a box plot with standardised RMSE values for all 17 fish stocks,
@@ -461,29 +640,41 @@ by = c("fit_type", "fleet_type", "eval_type")] |>
 # focus in the paper.
 plot_df = rbind(
   score[, .(fit_type, fleet_type, stock, rmse, tag = eval_type)],
-  score[eval_type == "forward" & fleet_type == "catch", .(fit_type, fleet_type, stock, rmse = conditional_rmse, tag = "conditional")]
+  score[eval_type == "forward" & fleet_type == "catch", .(
+    fit_type, fleet_type, stock, rmse = conditional_rmse, tag = "conditional"
+  )],
+  score[, .(fit_type, fleet_type = paste0("log-", fleet_type), stock, rmse = rmse2, tag = eval_type)],
+  score[eval_type == "forward" & fleet_type == "catch", .(
+    fit_type, fleet_type = paste0("log-", fleet_type), stock, rmse = conditional_rmse2, tag = "conditional"
+  )]
 )
-plot_df = plot_df[fit_type != "base"]
 plot_df[, let(
-  fleet_type = factor(fleet_type, levels = c("catch", "survey"), labels = c("Catch", "Survey")),
+  fleet_type = factor(
+    fleet_type,
+    levels = c("catch", "survey", "log-catch", "log-survey")[c(1, 3, 2, 4)],
+    labels = c("$\\hat C$", "$\\hat I$", "$\\log \\hat C$", "$\\log \\hat I$")[c(1, 3, 2, 4)]
+  ),
   fit_type = factor(
     fit_type,
-    levels = c("maximal", "spline1", "spline2"),
-    labels = c("Maximal", "Spline1", "Spline2")
+    levels = c("maximal", "spline"),
+    labels = c("Maximal", "Spline")
   ),
   tag = factor(
     tag,
     levels = c("crossval", "forward", "conditional"),
-    labels = c("Cross-validation", "Forward-validation", "Conditional forward-validation")
+    labels = c("Cross-validation", "Forward-validation", "Conditional\nforward-validation")
   )
 )]
 plot = ggplot(plot_df) +
   geom_boxplot(aes(x = as.numeric(fit_type), y = rmse, group = fit_type), outlier.size = 1) +
   scale_x_continuous(breaks = seq_along(levels(plot_df$fit_type)), labels = levels(plot_df$fit_type)) +
-  facet_grid(fleet_type ~ tag) +
+  facet_grid(fleet_type ~ tag, scales = "free_y") +
+  scale_y_continuous(breaks = seq(0, 2, by = .1)) +
+  #facet_grid(tag ~ fleet_type) +
   geom_hline(
     data = unique(plot_df[, .(tag, fleet_type, y = 1)]),
     aes(yintercept = y),
+    linewidth = 1,
     linetype = "dashed",
     col = "darkgray"
   ) +
@@ -491,7 +682,8 @@ plot = ggplot(plot_df) +
   theme_light() +
   theme(
     strip.text = element_text(colour = "black"),
-    strip.background = element_rect(colour = "#f0f0f0", fill = "#f0f0f0")
+    strip.background = element_rect(colour = "#f0f0f0", fill = "#f0f0f0"),
+    strip.text.y = element_text(angle = 0)
   ) +
   geom_point(
     data = plot_df[stock == "NEA_cod_2023"],
@@ -514,59 +706,53 @@ plot = ggplot(plot_df) +
 
 plot_tikz(
   plot = plot,
-  width = 9,
+  width = 7,
   height = 5,
   file = file.path(image_dir, "model_evaluation.pdf")
 )
 
-# ==============================================================================
-# Plot the penalty prior
-# ==============================================================================
 
-f = function(x, k, d) exp(d * (k - x)) / (1 + exp(d * (k - x)))
-
-k = 5
-x = seq(k - 4, k + 4, length.out = 500)
-d = c(
-  #10^seq(-1, 3, by = 0.5)
-  #.5, 1, 5, 10, 50, 100, 500, 1000
-  2^(-1:8)
-  #seq(.1, 1, by = .1),
-  #10^seq(-1, 3.4, length.out = 100)
-  #seq(2, 10, by = 1),
-  #seq(20, 100, by = 10),
-  #seq(200, 2000, by = 100)
-)
-df = expand.grid(x = x, d = d)
-df$y = f(x = df$x, k = k, d = df$d)
-
-plot = ggplot(df) +
-  geom_line(aes(x = x, y = y, group = d, col = factor(d)), alpha = .9) +
-  scale_color_viridis_d() +
-  #scale_color_viridis_d(
-  #  breaks = d,
-  #  labels = paste0("$10^{", log10(d), "}$")
-  #) +
-  #scale_color_viridis_c(
-  #  breaks = -1:3,
-  #  labels = paste0("$", c(0.1, 1, 10, 100, 1000), "$")
-  #) +
-  theme_light() +
-  theme(
-    #axis.title.y = element_text(angle = 0, vjust = .5),
-    text = element_text(size = 15)
-  ) +
-  scale_x_continuous(
-    breaks = (k-5):(k + 5),
-    labels = c(paste0("$K - ", 5:1, "$"), "$K$", paste0("$K + ", 1:5, "$")),
-    expand = c(0, 0)
-  ) +
-  labs(x = "$\\rho$", y = "$\\pi(\\rho; K, \\delta)$", col = "$\\delta$")
-  
-plot_tikz(
-  plot = plot,
-  width = 9,
-  height = 5,
-  file = file.path(image_dir, "penalty_prior.pdf")
-)
-
+# # ==============================================================================
+# # Plot the penalty term for the penalty parameter
+# # ==============================================================================
+# 
+# f = function(x, k, d) exp(d * (k - x)) / (1 + exp(d * (k - x)))
+# 
+# f2 = function(x, k, d) d * (k - x) - log(1 + exp(d * (k - x)))
+# 
+# f3 = function(x, k, d) {
+#   out = d * (k - x)
+#   i1 = which(out >= 50)
+#   i2 = which(out < 50)
+#   if (any(i1)) out[i1] = 0
+#   if (any(i2)) out[i2] = out[i2] - log(1 + exp(out[i2]))
+#   out
+# }
+# 
+# k = 5
+# x = seq(k - 1, k + 2, length.out = 500)
+# d = 2^(-1:8)
+# df = expand.grid(x = x, d = d)
+# df$y = f3(x = df$x, k = k, d = df$d)
+# 
+# plot = ggplot(df) +
+#   geom_line(aes(x = x, y = y, group = d, col = factor(d)), alpha = .9) +
+#   scale_color_viridis_d() +
+#   theme_light() +
+#   theme(
+#     text = element_text(size = 15)
+#   ) +
+#   scale_x_continuous(
+#     breaks = (k-5):(k + 5),
+#     labels = c(paste0("$K - ", 5:1, "$"), "$K$", paste0("$K + ", 1:5, "$")),
+#     expand = c(0, 0)
+#   ) +
+#   labs(x = "$\\rho$", y = "$e(\\rho; K, \\delta)$", col = "$\\delta$")
+#   
+# plot_tikz(
+#   plot = plot,
+#   width = 9,
+#   height = 5,
+#   file = file.path(image_dir, "penalty_penalisation.pdf")
+# )
+# 

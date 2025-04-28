@@ -36,7 +36,8 @@ do_evaluation = function(fits,
                          min_obs_years = 5,
                          n_cores = 8,
                          forward = FALSE,
-                         eval_data = NULL) {
+                         eval_data = NULL,
+                         ...) {
   start_time = Sys.time()
   combinations = expand.grid(year = eval_years, fit_nr = seq_along(fits))
   res = parallel::mclapply(
@@ -60,7 +61,8 @@ do_evaluation = function(fits,
           year = year,
           data = fits[[fit_nr]]$data,
           conf = fits[[fit_nr]]$conf,
-          min_obs_years = min_obs_years
+          min_obs_years = min_obs_years,
+          ...
         )
 
         if (!is.null(fit)) {
@@ -84,7 +86,7 @@ do_evaluation = function(fits,
               catchval.exact = tot_weight
             )
             pred_mean = apply(fc[[1]]$catchatage, 1, mean)
-            pred_mean
+            log(pred_mean)
           },
           error = function(e) NA
           )
@@ -99,14 +101,20 @@ do_evaluation = function(fits,
         fit = cross_validate(
           years = year,
           data = fits[[fit_nr]]$data,
-          conf = fits[[fit_nr]]$conf
+          conf = fits[[fit_nr]]$conf,
+          ...
         )
       }
       if (is.null(fit)) {
         message("fit_nr: ", fit_nr, "/", length(fits),
                 ", year: ", which(year == eval_years), "/", length(eval_years),
                 ", FAILED")
-        return(data.table(fit_type = names(fits)[fit_nr], year = year, convergence = FALSE, convergence_sam = FALSE))
+        return(data.table(
+          fit_type = names(fits)[fit_nr],
+          year = year,
+          convergence = FALSE,
+          convergence_sam = FALSE
+        ))
       }
       misc_info = list(
         logN = fit$pl$logN,
@@ -120,6 +128,9 @@ do_evaluation = function(fits,
         fit_type = names(fits)[fit_nr],
         convergence = (fit$opt$nlminb_convergence == 0),
         convergence_sam = (fit$opt$convergence == 0),
+        message = fit$opt$message,
+        opt_iter = fit$opt$iterations,
+        opt_eval = sum(fit$opt$evaluations),
         year = year,
         obs = fit$prediction$obs,
         pred = fit$prediction$pred,
@@ -132,9 +143,11 @@ do_evaluation = function(fits,
       }
       attr(res, "misc_info") = misc_info
       time_passed = difftime(Sys.time(), start_time)
-      message("fit: ", fit_nr, "/", length(fits),
-              ", year: ", which(year == eval_years), "/", length(eval_years),
-              ", time passed: ", round(time_passed, 2), " ", attr(time_passed, "units"))
+      message(
+        "fit: ", fit_nr, "/", length(fits),
+        ", year: ", which(year == eval_years), "/", length(eval_years),
+        ", time passed: ", round(time_passed, 2), " ", attr(time_passed, "units")
+      )
       res
     })
   res
@@ -226,10 +239,10 @@ plot_fits = function(fits, pretty = FALSE) {
     cols = "gray"
     sizes = 2.5
   } else {
-    has_official_model = any(tolower(all_fit_types) == "official")
-    if (has_official_model) {
-      official_index = which(tolower(all_fit_types) == "official")
-      all_fit_types = c(all_fit_types[official_index], all_fit_types[-official_index])
+    has_final_model = any(tolower(all_fit_types) == "final")
+    if (has_final_model) {
+      final_index = which(tolower(all_fit_types) == "final")
+      all_fit_types = c(all_fit_types[final_index], all_fit_types[-final_index])
       cols = c("gray", scales::hue_pal()(n_fits - 1))
       sizes = c(2.5, rep(1, n_fits - 1))
     } else {
@@ -278,7 +291,12 @@ plot_fits = function(fits, pretty = FALSE) {
 
 # This function is used as a `recipe_func` in the add_spline_info_to_conf() function.
 # Create a "cs" spline with a suitable penalty matrix, using mgcv
-get_spline1_conf_parts = function(conf, key, data, k = Inf, ...) {
+get_spline_conf_parts = function(conf,
+                                 key,
+                                 data,
+                                 k = Inf,
+                                 age_transform = function(a) log(a + 1),
+                                 ...) {
   # Preallocate lists for the spline matrices X and S, which we will compute for
   # each row of the key matrix
   X = S = vector("list", nrow(key))
@@ -291,7 +309,7 @@ get_spline1_conf_parts = function(conf, key, data, k = Inf, ...) {
     # If there are no age groups, then skip to the next row of the key matrix
     if (!any(age_group_index)) next
     ages = age_group_index + conf$minAge - 1
-    log_ages = log(ages + 1)
+    ages = age_transform(ages)
     n_ages = length(ages)
     if (n_ages < 3) {
       # If the catch-at-age estimates or survey indices of interest only contains two unique
@@ -303,15 +321,12 @@ get_spline1_conf_parts = function(conf, key, data, k = Inf, ...) {
     } else {
       # Create the spline matrices X and S, using mgcv
       spline_model = mgcv::gam(
-        formula = y ~ s(log_age, bs = "cs", k = min(n_ages, k)),
-        data = data.frame(y = 1, log_age = log_ages),
+        formula = y ~ s(age, bs = "cs", k = min(n_ages, k)),
+        data = data.frame(y = 1, age = ages),
         fit = FALSE
       )
       X[[i]] = spline_model$X
       S[[i]] = spline_model$smooth[[1]]$S[[1]]
-      # Reweight the elements of S that belong to the youngest age groups
-      weights = pmin(1, exp(-4 + seq_len(ncol(S[[i]]))))
-      S[[i]] = diag(weights) %*% S[[i]] %*% diag(weights)
       # Add zero columns/rows to S[[i]] to ensure that it has the same number of
       # rows and columns as the number of parameters. In this case, we know that
       # S contains a row/column for all spline parameters, but not for the intercept term,
@@ -331,7 +346,12 @@ get_spline1_conf_parts = function(conf, key, data, k = Inf, ...) {
 
 # This function is used as a `recipe_func` in the add_spline_info_to_conf() function.
 # Create a "bs" spline with a suitable penalty matrix, using mgcv
-get_spline2_conf_parts = function(conf, key, data, k = Inf, ...) {
+get_spline2_conf_parts = function(conf,
+                                  key,
+                                  data,
+                                  k = Inf,
+                                  age_transform = function(a) log(a + 1),
+                                  ...) {
   # Preallocate lists for the spline matrices X and S, which we will compute for
   # each row of the key matrix
   X = S = vector("list", nrow(key))
@@ -344,7 +364,7 @@ get_spline2_conf_parts = function(conf, key, data, k = Inf, ...) {
     # If there are no age groups, then skip to the next row of the key matrix
     if (!any(age_group_index)) next
     ages = age_group_index + conf$minAge - 1
-    log_ages = log(ages + 1)
+    ages = age_transform(ages)
     n_ages = length(ages)
     if (n_ages < 3) {
       # If the catch-at-age estimates or survey indices of interest only contains two unique
@@ -361,15 +381,12 @@ get_spline2_conf_parts = function(conf, key, data, k = Inf, ...) {
       m = if (n_ages <= 4) c(2, 2) else c(3, 2)
       # Create the spline matrices X and S, using mgcv
       spline_model = mgcv::gam(
-        formula = y ~ s(log_age, bs = "bs", k = min(n_ages, k), m = m),
-        data = data.frame(y = 1, log_age = log_ages),
+        formula = y ~ s(age, bs = "bs", k = min(n_ages, k), m = m),
+        data = data.frame(y = 1, age = ages),
         fit = FALSE
       )
       X[[i]] = spline_model$X
       S[[i]] = spline_model$smooth[[1]]$S[[1]]
-      # Reweight the elements of S that belong to the youngest age groups
-      weights = pmin(1, exp(-4 + seq_len(ncol(S[[i]]))))
-      S[[i]] = diag(weights) %*% S[[i]] %*% diag(weights)
       # Add zero columns/rows to S[[i]] to ensure that it has the same number of
       # rows and columns as the number of parameters. In this case, we know that
       # S contains a row/column for all spline parameters, but not for the intercept term,
@@ -389,7 +406,7 @@ get_spline2_conf_parts = function(conf, key, data, k = Inf, ...) {
 
 # The actual function for doing cross-validation, which is called from inside
 # the do_evaluation function
-cross_validate = function(years, data, conf) {
+cross_validate = function(years, data, conf, ...) {
 
   # Find out which parts of the data to set to NA
   missing_index = which(data$aux[, "year"] %in% years)
@@ -406,7 +423,8 @@ cross_validate = function(years, data, conf) {
     data = data,
     conf = conf,
     parameters = stockassessment::defpar(data, conf),
-    newtonsteps = 0
+    newtonsteps = 0,
+    ...
   )
 
   if (is.null(fit)) return(NULL)
@@ -428,7 +446,8 @@ forward_validate = function(year,
                             data,
                             conf,
                             min_obs_years = 5,
-                            n_pred_years = 1) {
+                            n_pred_years = 1,
+                            ...) {
 
   fleets_to_keep = fleets_to_drop = NULL
   for (f in sort(unique(data$aux[, "fleet"]))) {
@@ -473,7 +492,8 @@ forward_validate = function(year,
     data = data,
     conf = conf,
     parameters = stockassessment::defpar(data, conf),
-    newtonsteps = 0
+    newtonsteps = 0,
+    ...
   )
 
   if (is.null(fit)) return(NULL)

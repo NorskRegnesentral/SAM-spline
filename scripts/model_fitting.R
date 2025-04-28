@@ -6,19 +6,26 @@ library(here)
 # Paths and other stuff
 # ==============================================================================
 
-# Path to the directory where we store our results
-sam_dir = here::here()
-results_dir = file.path(sam_dir, "raw_data", "results")
-if (!dir.exists(results_dir)) dir.create(results_dir, recursive = TRUE)
-
 # The minimum number of years required to not delete a survey fleet during forward-validation
 min_obs_years_forward = 4
 # The number of parallel cores to be used for cross/forward-validation
 n_cores = 10
 
+n_sims = 100
+
+rel.tol = 1e-8
+
+age_transform = function(a) sqrt(a)
+
+# Path to the directory where we store our results
+sam_dir = here::here()
+results_dir = file.path(sam_dir, "raw_data", "results")
+if (!dir.exists(results_dir)) dir.create(results_dir, recursive = TRUE)
+
 # Should we overwrite the results if they already exist?
-overwrite_fits = FALSE # Override model fits for each of the 17 fish stocks?
-overwrite_eval = FALSE # Override cross/forward validation results?
+overwrite_fits = FALSE # Overwrite model fits for each of the 17 fish stocks?
+overwrite_eval = FALSE # Overwrite cross/forward validation results?
+overwrite_sim = FALSE # Overwrite results from the simulation study?
 
 # Ensure that only one thread is used by OMP and BLAS
 RhpcBLASctl::omp_set_num_threads(1)
@@ -108,8 +115,7 @@ stocks = list(
   )
 )
 
-# Loop over all the fish stock data sets, fit our four competing models to the data,
-# and then perform cross-validation and forward-validation
+# Loop over all the fish stock data sets and fit our four competing models to the data
 start_time = Sys.time()
 for (i in seq_along(stocks)) {
 
@@ -127,23 +133,22 @@ for (i in seq_along(stocks)) {
   if (file.exists(out_path)) {
     res = readRDS(out_path)
   } else {
-    res = list(fits = list(), forward = NULL, crossval = NULL)
+    res = list(fits = list(), forward = NULL, crossval = NULL, simulations = NULL)
   }
   if (overwrite_eval) res$forward = res$crossval = NULL
   if (overwrite_fits) res$fits = list()
 
-
-  # Fit the official model to the data.
-  # This is done using the fitfromweb function, to download the official model configuration
+  # Fit the final model to the data.
+  # This is done using the fitfromweb function, to download the final model configuration
   # from stockassessment.org. Then we use the refit function to estimate all model parameters
-  if (!"official" %in% names(res$fits)) {
-    message("Start fitting the official model")
-    res$fits$official = stockassessment::fitfromweb(stocks[[i]]$webname, character.only = TRUE)
-    res$fits$official = stockassessment:::refit(res$fits$official, silent = TRUE, trace = 0)
+  if (!"final" %in% names(res$fits)) {
+    message("Start fitting the final model")
+    res$fits$final = stockassessment::fitfromweb(stocks[[i]]$webname, character.only = TRUE)
+    res$fits$final = stockassessment:::refit(res$fits$final, silent = TRUE, trace = 0)
   }
 
-  data = res$fits$official$data
-  conf = res$fits$official$conf
+  data = res$fits$final$data
+  conf = res$fits$final$conf
 
   # Fit the maximal model to the data.
   # This is done by simply changing the keyLogFpar and keyVarObs objects of
@@ -168,7 +173,7 @@ for (i in seq_along(stocks)) {
       # Get the default initial values for the current combination of data and conf
       par = stockassessment::defpar(data, conf)
       # Estimate model parameters
-      fit = my_sam_fit(data, conf, par)
+      fit = my_sam_fit(data, conf, par, rel.tol = rel.tol)
       # If the model fitting failed, we just return a list containing the data and conf
       # necessary for trying to estimate the parameters. This is later used
       # when performing cross/forward-validation for different subsets of the data
@@ -177,59 +182,19 @@ for (i in seq_along(stocks)) {
     })
   }
 
-  # Fit the spline1 model to the data.
+  # Fit the spline model to the data.
   # This is done by computing the spline matrices X and S, and adding them to the conf,
   # in addition to setting/changing some other conf options.
   # The computation of X and S happens inside the add_spline_info_to_conf() function
-  if (!"spline1" %in% names(res$fits)) {
-    message("Start fitting spline 1")
-    res$fits$spline1 = local({
+  if (!"spline" %in% names(res$fits)) {
+    message("Start fitting the spline model")
+    res$fits$spline = local({
       # Compute and add all necessary spline matrices to the conf
       conf = add_spline_info_to_conf(
         conf = conf,
-        recipe_func = get_spline1_conf_parts,
-        data = data
-      )
-
-      # This tells us that we should use splines for logFpar
-      conf$useLogFparSpline = 1
-      # This tells us that we should penalise the splines for logFpar
-      conf$useLogFparSplinePenalty = 1
-      # This tells us that we should use splines for logSdLogObs
-      conf$useVarObsSpline = 1
-      # This tells us that we should penalise the splines for logSdLogObs
-      conf$useVarObsSplinePenalty = 1
-      # This tells us that the logFpar spline coefficients should be modelled as latent parameters
-      conf$latentLogFparSpline = 1
-      # This tells us the max value of the log of the smoothness penalty parameters before the
-      # smoothness penalty prior should start to heavily penalise large smoothness penalty values
-      conf$splinePenaltyMax = 7
-      conf$splinePenaltySpeed = 100
-      
-      # Get the default initial values for the current combination of data and conf
-      par = stockassessment::defpar(data, conf)
-      # Estimate model parameters
-      fit = my_sam_fit(data, conf, par)
-      # If the model fitting failed, we just return a list containing the data and conf
-      # necessary for trying to estimate the parameters. This is later used
-      # when performing cross/forward-validation for different subsets of the data
-      if (is.null(fit)) fit = list(data = data, conf = conf)
-
-      fit
-    })
-  }
-
-  # Fit the spline2 model to the data.
-  # This is done by computing the spline matrices X and S, and adding them to the conf,
-  # in addition to setting/changing some other conf options.
-  # The computation of X and S happens inside the add_spline_info_to_conf() function
-  if (!"spline2" %in% names(res$fits)) {
-    message("Start fitting spline 2")
-    res$fits$spline2 = local({
-      # Compute and add all necessary spline matrices to the conf
-      conf = add_spline_info_to_conf(
-        conf = conf,
-        recipe_func = get_spline2_conf_parts,
+        recipe_func = get_spline_conf_parts,
+        modify_S = modify_S,
+        age_transform = age_transform,
         data = data
       )
 
@@ -251,7 +216,7 @@ for (i in seq_along(stocks)) {
       # Get the default initial values for the current combination of data and conf
       par = stockassessment::defpar(data, conf)
       # Estimate model parameters
-      fit = my_sam_fit(data, conf, par)
+      fit = my_sam_fit(data, conf, par, rel.tol = rel.tol)
       # If the model fitting failed, we just return a list containing the data and conf
       # necessary for trying to estimate the parameters. This is later used
       # when performing cross/forward-validation for different subsets of the data
@@ -260,6 +225,29 @@ for (i in seq_along(stocks)) {
       fit
     })
   }
+
+  message("Done! Classes: ", paste(sapply(res$fit, class), collapse = ", "), "\n")
+
+  saveRDS(res, out_path)
+}
+
+# Perform forward- and cross-validation
+start_time = Sys.time()
+for (i in seq_along(stocks)) {
+  
+  # Print the progress so far
+  time_passed = Sys.time() - start_time
+  message(
+    "\n==============================================================================\n",
+    "Start on fish stock nr. ", i, " / ", length(stocks),
+    "\nTime passed since start: ", round(as.numeric(time_passed), 2), " ", attr(time_passed, "units"),
+    "\n==============================================================================\n"
+  )
+
+  out_path = file.path(results_dir, stocks[[i]]$filename)
+  res = readRDS(out_path)
+  data = res$fits[[1]]$data
+  if (overwrite_eval) res$forward = res$crossval = NULL
 
   # Perform the forward-validation study
   res$forward = do_evaluation(
@@ -268,6 +256,7 @@ for (i in seq_along(stocks)) {
     min_obs_years = min_obs_years_forward,
     n_cores = n_cores,
     forward = TRUE,
+    rel.tol = rel.tol,
     eval_data = res$forward
   )
 
@@ -277,16 +266,87 @@ for (i in seq_along(stocks)) {
     eval_years = tail(sort(data$years), -1),
     n_cores = n_cores,
     forward = FALSE,
+    rel.tol = rel.tol,
     eval_data = res$crossval
   )
-
-  # The fitted SAM models require a lot of memory to save, because they contain
-  # an entire R environment that is full of large objects. We remove this R environment
-  # before saving the SAM models
-  for (j in seq_along(res$fits)) {
-    res$fits[[j]]$obj = NULL
-  }
 
   saveRDS(res, out_path)
 }
 
+start_time = Sys.time()
+for (i in seq_along(stocks)) {
+  
+  # Print the progress so far
+  time_passed = Sys.time() - start_time
+  message(
+    "\n==============================================================================\n",
+    "Start on fish stock nr. ", i, " / ", length(stocks),
+    "\nTime passed since start: ", round(as.numeric(time_passed), 2), " ", attr(time_passed, "units"),
+    "\n==============================================================================\n"
+  )
+
+  out_path = file.path(results_dir, stocks[[i]]$filename)
+  res = readRDS(out_path)
+
+  if (overwrite_sim || is.null(res$simulations)) {
+    res$simulations = list()
+    sim_start_time = Sys.time()
+    set.seed(1)
+    for (j in seq_along(res$fits)) {
+      if (class(res$fits[[j]]) != "sam") next
+      sims = simulate(res$fits[[j]], n_sims)
+      logssb = res$fits[[j]]$sdrep$value[names(res$fits[[j]]$sdrep$value) == "logssb"]
+      logfbar = res$fits[[j]]$sdrep$value[names(res$fits[[j]]$sdrep$value) == "logfbar"]
+
+      res$simulations[[j]] = parallel::mclapply(
+        X = seq_len(n_sims),
+        mc.cores = n_cores,
+        mc.preschedule = FALSE,
+        FUN = function(l) {
+          my_fits = lapply(
+            X = res$fits,
+            FUN = function(x) {
+              par = stockassessment::defpar(sims[[l]], x$conf)
+              my_sam_fit(sims[[l]], x$conf, par, rel.tol = rel.tol)
+            })
+          out = lapply(
+            X = names(res$fits),
+            FUN = function(name) {
+              out = data.table(
+                model = name,
+                year = rep(res$fits[[name]]$data$years, 2),
+                sim_nr = l,
+                simulation_model = names(res$fits)[j],
+                truth = c(logssb, logfbar),
+                tag = rep(c("logssb", "logfbar"), c(length(logssb), length(logfbar)))
+              )
+              if (is.null(my_fits[[name]])) return(out)
+              x = my_fits[[name]]
+              ssb_index = which(names(x$sdrep$value) == "logssb")
+              fbar_index = which(names(x$sdrep$value) == "logfbar")
+              out[, let(
+                convergence = x$opt$nlminb_convergence,
+                pred = x$sdrep$value[c(ssb_index, fbar_index)],
+                sd = x$sdrep$sd[c(ssb_index, fbar_index)]
+              )]
+              out
+            })
+          out = rbindlist(out, fill = TRUE)
+          time_passed = difftime(Sys.time(), sim_start_time)
+          message(
+            "stock nr: ", i, "/", length(stocks),
+            ", fit_nr: ", j, "/", length(res$fits),
+            ", sim: ", l, "/", n_sims,
+            ", time passed: ", round(time_passed, 2), " ", attr(time_passed, "units")
+          ) 
+          out
+        }
+      )
+      res$simulations[[j]] = rbindlist(res$simulations[[j]], fill = TRUE)
+
+    }
+    res$simulations = rbindlist(res$simulations, fill = TRUE)
+  }
+
+  saveRDS(res, out_path)
+}
