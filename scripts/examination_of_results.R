@@ -418,8 +418,8 @@ plot_tikz(
   width = 10,
   height = 3.8
 )
-  
-probs = seq(.05, .95, by = .05)
+
+probs = seq(.75, .99, by = .02)
 
 coverage_data = list()
 for (prob in probs) {
@@ -429,7 +429,6 @@ for (prob in probs) {
     prob = prob
   ),
   by = c("model", "simulation_model", "stock", "tag")]
-  #by = c("model", "simulation_model")]
 }
 coverage_data = rbindlist(coverage_data)
 coverage_data[, let(
@@ -453,7 +452,6 @@ coverage_data[, let(
 plot = ggplot(coverage_data[tag == "SSB"]) +
   geom_boxplot(aes(x = prob, y = coverage, group = prob)) +
   geom_abline(slope = 1, intercept = 0) +
-  coord_equal() +
   theme_light() +
   theme(
     strip.text = element_text(colour = "black"),
@@ -462,26 +460,21 @@ plot = ggplot(coverage_data[tag == "SSB"]) +
   ) +
   labs(x = "$p$", y = "Coverage probability") +
   scale_x_continuous(
-    breaks = seq(0, 1, by = .25),
-    labels = c("0", "0.25", "0.50", "0.75", "1"),
-    limits = c(0, 1)
+    breaks = seq(.75, 1, by = .05),
+    limits = c(.73, 1)
   ) +
   scale_y_continuous(
     breaks = seq(0, 1, by = .25),
-    labels = c("0", "0.25", "0.50", "0.75", "1"),
     limits = c(0, 1)
   ) +
   facet_grid(model ~ simulation_model)
-  #facet_wrap(~model)
 
 plot_tikz(
   plot = plot,
   file = file.path(image_dir, "simulation_coverage.pdf"),
   width = 6,
-  #width = 11,
   height = 5.5
 )
-
 
 # ==============================================================================
 # Create a nice latex-table that describes all the 17 fish stocks
@@ -710,49 +703,3 @@ plot_tikz(
   height = 5,
   file = file.path(image_dir, "model_evaluation.pdf")
 )
-
-
-# # ==============================================================================
-# # Plot the penalty term for the penalty parameter
-# # ==============================================================================
-# 
-# f = function(x, k, d) exp(d * (k - x)) / (1 + exp(d * (k - x)))
-# 
-# f2 = function(x, k, d) d * (k - x) - log(1 + exp(d * (k - x)))
-# 
-# f3 = function(x, k, d) {
-#   out = d * (k - x)
-#   i1 = which(out >= 50)
-#   i2 = which(out < 50)
-#   if (any(i1)) out[i1] = 0
-#   if (any(i2)) out[i2] = out[i2] - log(1 + exp(out[i2]))
-#   out
-# }
-# 
-# k = 5
-# x = seq(k - 1, k + 2, length.out = 500)
-# d = 2^(-1:8)
-# df = expand.grid(x = x, d = d)
-# df$y = f3(x = df$x, k = k, d = df$d)
-# 
-# plot = ggplot(df) +
-#   geom_line(aes(x = x, y = y, group = d, col = factor(d)), alpha = .9) +
-#   scale_color_viridis_d() +
-#   theme_light() +
-#   theme(
-#     text = element_text(size = 15)
-#   ) +
-#   scale_x_continuous(
-#     breaks = (k-5):(k + 5),
-#     labels = c(paste0("$K - ", 5:1, "$"), "$K$", paste0("$K + ", 1:5, "$")),
-#     expand = c(0, 0)
-#   ) +
-#   labs(x = "$\\rho$", y = "$e(\\rho; K, \\delta)$", col = "$\\delta$")
-#   
-# plot_tikz(
-#   plot = plot,
-#   width = 9,
-#   height = 5,
-#   file = file.path(image_dir, "penalty_penalisation.pdf")
-# )
-# 
